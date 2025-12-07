@@ -6,8 +6,8 @@ from pathlib import Path
 # --------------------------------------------
 
 # --------- Data Preparation Parameters ---------
-WINDOW_SIZE_MS = [None, 250, 500, 750, 1000]
-
+#WINDOW_SIZE_MS = [None, 250, 500, 750, 1000]
+WINDOW_SIZE_MS = [1000]
 # Raw IMU data path
 RAW_DATA_PATH = r"C:\Users\giusy\OneDrive\Desktop\AI_Healtcare\IMU-compensatory-movement-detection\Data\IMU Data"
 
@@ -28,8 +28,8 @@ CONFIG = {
         #"RF", 
         #"SVM", 
         #"KNN", 
-        "MLP",
-        "XGBoost", 
+        #"MLP",
+        #"XGBoost", 
         #"LightGBM", 
         "LASSO_LR"
     ],
@@ -60,6 +60,9 @@ CONFIG = {
     "exclude_acc": False,
     "exclude_gyro": False,
     "exclude_mag": False,
+
+    # Modify this to train on specific tasks
+    "task_specific": False, 
 }
 
 
@@ -73,6 +76,7 @@ def ensure_directories():
     folders = [
         FEATURE_SAVE_PATH,
         CONFIG["features_folder"],
+        CONFIG["models_folder"],
         CONFIG["plots_folder"],
         CONFIG["importance_folder"],
         CONFIG["shap_folder"],
