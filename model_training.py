@@ -155,7 +155,9 @@ def main():
 
     
     # Check if results file exists to resume
-    results_file = Path(CONFIG['models_folder'])/"loso_results.csv"
+
+
+    results_file = Path(CONFIG['models_folder'])/"model_results_summary.csv"
     if results_file.exists():
         print("Loading existing results from", results_file)
         results_df = pd.read_csv(results_file)
@@ -189,12 +191,11 @@ def main():
         subjects = df['subject'].unique()
         tasks = df['task'].unique()
 
-        for task in tasks:
-            print("Task :",task)
-            df_task = df[df['task'] == task]
-            if df_task.empty:
-                continue
 
+
+        # check if we want to train on specific tasks only
+        if not CONFIG["task_specific"]:
+            print("Training on all tasks combined")
             for model_name in CONFIG["models_to_use"]:
                 print("Model :", model_name)
                 best_score = -np.inf
@@ -207,13 +208,13 @@ def main():
                     preds_all, probs_all, y_true_all = [], [], []
 
                     for test_subject in subjects:
-                        train_mask = df_task['subject'] != test_subject
-                        test_mask = df_task['subject'] == test_subject
+                        train_mask = df['subject'] != test_subject
+                        test_mask = df['subject'] == test_subject
 
-                        X_train = df_task.loc[train_mask, features].values
-                        y_train = df_task.loc[train_mask, 'Label'].values
-                        X_test = df_task.loc[test_mask, features].values
-                        y_test = df_task.loc[test_mask, 'Label'].values
+                        X_train = df.loc[train_mask, features].values
+                        y_train = df.loc[train_mask, 'Label'].values
+                        X_test = df.loc[test_mask, features].values
+                        y_test = df.loc[test_mask, 'Label'].values
 
                         if len(X_train) == 0 or len(X_test) == 0:
                             continue
@@ -253,17 +254,20 @@ def main():
 
                 y_true_all, y_pred_all, y_proba_all = best_predictions
                 metrics = compute_metrics(y_true_all, y_pred_all, y_proba_all)
-
+                print("Metrics computed:", metrics)
                 for metric in ['f1_macro', 'accuracy', 'precision_macro', 'recall_macro', 'roc_auc']:
                     values = [metrics[metric]] * len(subjects)
                     mean, lower, upper = bootstrap_ci(values, n_bootstrap=CONFIG["n_bootstrap"])
+                    
+                    metrics[f"{metric}"] = metrics[metric]
                     metrics[f"{metric}_mean"] = mean
                     metrics[f"{metric}_lower"] = lower
                     metrics[f"{metric}_upper"] = upper
-
+                    print("Without CI for", metric, ":", metrics[metric])
+                    print("Bootstrap CI for", metric, ":", mean, lower, upper)
                 metrics.update({
                     'window_size': window_size,
-                    'task': task,
+                    'task': "all_tasks",
                     'model_name': model_name,
                     'best_params': str(best_params)
                 })
@@ -271,108 +275,200 @@ def main():
                 # concat to results_df
                 results_df = pd.concat([results_df, pd.DataFrame([metrics])], ignore_index=True)
                 # save after each model
-                print(f"Completed {model_name} on task {task} (win={window_size})")
+                print(f"Completed {model_name} on all tasks (win={window_size})")
+                print(f"Best params: {best_params}")
                 print(f"Accuracy={metrics['accuracy_mean']:.3f} (+{metrics['accuracy_upper'] - metrics['accuracy_mean']:.3f}/-{metrics['accuracy_mean'] - metrics['accuracy_lower']:.3f}),")
                 
                 results_df.to_csv(results_file, index=False)
-               
-                # ------------------ Retrain Best Performing on full task data ------------------
-                full_model = create_model(model_name, best_params)
-                scaler = StandardScaler()
 
-                X_all = scaler.fit_transform(df_task[features].values)
-                y_all = df_task['Label'].values
-
-                # If no samples, skip
-                if len(X_all) == 0:
+        if CONFIG["task_specific"]:
+            # Train task specific models    
+            for task in tasks:
+                print("Task :",task)
+                df_task = df[df['task'] == task]
+                if df_task.empty:
                     continue
 
-                full_model.fit(X_all, y_all)
+                for model_name in CONFIG["models_to_use"]:
+                    print("Model :", model_name)
+                    best_score = -np.inf
+                    best_params = None
+                    best_predictions = None
 
-                # ------------------ Feature importances ------------------
-                importances = None
-                if hasattr(full_model, 'feature_importances_'):
-                    importances = full_model.feature_importances_
-                elif hasattr(full_model, 'coef_'):
-                    # For multiclass, coef_ is (n_classes, n_features); take mean abs
-                    coef = full_model.coef_
-                    if coef.ndim == 1:
-                        importances = np.abs(coef)
-                    else:
-                        importances = np.mean(np.abs(coef), axis=0)
-                else:
-                    # fallback to permutation importance
-                    try:
-                        r = permutation_importance(full_model, X_all, y_all, n_repeats=20, random_state=RANDOM_STATE, n_jobs=-1)
-                        importances = r.importances_mean
-                    except Exception as e:
-                        print("Permutation importance failed for", model_name, e)
-                        importances = np.zeros(len(features))
+                    # grid search via ParameterGrid
+                    for params in ParameterGrid(CONFIG["param_grids"][model_name]):
+                        subject_scores = []
+                        preds_all, probs_all, y_true_all = [], [], []
 
-                df_imp = pd.DataFrame({
-                    'feature': features,
-                    'importance': importances,
-                    'task': task,
-                    'model': model_name,
-                    'window_size': window_size
-                })
-                all_feature_importances.append(df_imp)
+                        for test_subject in subjects:
+                            train_mask = df_task['subject'] != test_subject
+                            test_mask = df_task['subject'] == test_subject
 
-                # ------------------ SHAP for tree models + Logistic (if available) ------------------
-                shap_mean_abs = None
-                shap_possible_models = ['RF', 'XGBoost', 'LightGBM', 'LASSO_LR']
-                if SHAP_AVAILABLE and model_name in shap_possible_models:
-                    try:
-                        # sample background to limit compute
-                        sample_size = min(CONFIG['shap_sample_size'], X_all.shape[0])
-                        if sample_size <= 0:
+                            X_train = df_task.loc[train_mask, features].values
+                            y_train = df_task.loc[train_mask, 'Label'].values
+                            X_test = df_task.loc[test_mask, features].values
+                            y_test = df_task.loc[test_mask, 'Label'].values
+
+                            if len(X_train) == 0 or len(X_test) == 0:
+                                continue
+
+                            scaler = StandardScaler()
+                            X_train = scaler.fit_transform(X_train)
+                            X_test = scaler.transform(X_test)
+                            X_train, y_train = sk_shuffle(X_train, y_train, random_state=RANDOM_STATE)
+
+                            model = create_model(model_name, params)
+                            model.fit(X_train, y_train)
+                            y_pred = model.predict(X_test)
+                            y_proba = model.predict_proba(X_test) if hasattr(model, "predict_proba") else None
+
+                            preds_all.append(y_pred)
+                            y_true_all.append(y_test)
+                            if y_proba is not None:
+                                probs_all.append(y_proba)
+
+                            subject_scores.append(f1_score(y_test, y_pred, average='macro'))
+
+                        if not preds_all:
                             continue
-                        # pick background/sample rows
-                        if sample_size < X_all.shape[0]:
-                            idx = np.random.choice(np.arange(X_all.shape[0]), size=sample_size, replace=False)
-                            X_shap = X_all[idx]
+
+                        mean_score = np.mean(subject_scores)
+                        if mean_score > best_score:
+                            best_score = mean_score
+                            best_params = params
+                            best_predictions = (
+                                np.concatenate(y_true_all),
+                                np.concatenate(preds_all),
+                                np.vstack(probs_all) if probs_all else None
+                            )
+
+                    if best_predictions is None:
+                        continue
+
+                    y_true_all, y_pred_all, y_proba_all = best_predictions
+                    metrics = compute_metrics(y_true_all, y_pred_all, y_proba_all)
+
+                    for metric in ['f1_macro', 'accuracy', 'precision_macro', 'recall_macro', 'roc_auc']:
+                        values = [metrics[metric]] * len(subjects)
+                        mean, lower, upper = bootstrap_ci(values, n_bootstrap=CONFIG["n_bootstrap"])
+                        metrics[f"{metric}_mean"] = mean
+                        metrics[f"{metric}_lower"] = lower
+                        metrics[f"{metric}_upper"] = upper
+
+                    metrics.update({
+                        'window_size': window_size,
+                        'task': task,
+                        'model_name': model_name,
+                        'best_params': str(best_params)
+                    })
+                    all_results.append(metrics)
+                    # concat to results_df
+                    results_df = pd.concat([results_df, pd.DataFrame([metrics])], ignore_index=True)
+                    # save after each model
+                    print(f"Completed {model_name} on task {task} (win={window_size})")
+                    print(f"Accuracy={metrics['accuracy_mean']:.3f} (+{metrics['accuracy_upper'] - metrics['accuracy_mean']:.3f}/-{metrics['accuracy_mean'] - metrics['accuracy_lower']:.3f}),")
+                    
+                    results_df.to_csv(results_file, index=False)
+                
+                    # ------------------ Retrain Best Performing on full task data ------------------
+                    full_model = create_model(model_name, best_params)
+                    scaler = StandardScaler()
+
+                    X_all = scaler.fit_transform(df_task[features].values)
+                    y_all = df_task['Label'].values
+
+                    # If no samples, skip
+                    if len(X_all) == 0:
+                        continue
+
+                    full_model.fit(X_all, y_all)
+
+                    # ------------------ Feature importances ------------------
+                    importances = None
+                    if hasattr(full_model, 'feature_importances_'):
+                        importances = full_model.feature_importances_
+                    elif hasattr(full_model, 'coef_'):
+                        # For multiclass, coef_ is (n_classes, n_features); take mean abs
+                        coef = full_model.coef_
+                        if coef.ndim == 1:
+                            importances = np.abs(coef)
                         else:
-                            X_shap = X_all
+                            importances = np.mean(np.abs(coef), axis=0)
+                    else:
+                        # fallback to permutation importance
+                        try:
+                            r = permutation_importance(full_model, X_all, y_all, n_repeats=20, random_state=RANDOM_STATE, n_jobs=-1)
+                            importances = r.importances_mean
+                        except Exception as e:
+                            print("Permutation importance failed for", model_name, e)
+                            importances = np.zeros(len(features))
 
-                        if model_name in ['XGBoost', 'LightGBM', 'RF']:
-                            explainer = shap.TreeExplainer(full_model)
-                            shap_values = explainer.shap_values(X_shap)
-                        elif model_name == 'LASSO_LR':
-                            explainer = shap.LinearExplainer(full_model, X_shap, feature_perturbation='interventional')
-                            shap_values = explainer.shap_values(X_shap)
-                        else:
-                            shap_values = None
-
-                        if shap_values is not None:
-                            # unify to array for mean absolute computation
-                            if isinstance(shap_values, list):
-                                # multiclass tree / linear models: list of arrays (n_samples, n_features)
-                                shap_arr = np.stack(shap_values, axis=-1)  # shape: (n_samples, n_features, n_classes)
-                            else:
-                                shap_arr = shap_values  # shape: (n_samples, n_features)
-
-                            shap_arr = np.abs(shap_arr)
-
-                            if shap_arr.ndim == 2:
-                                shap_mean_abs = shap_arr.mean(axis=0)
-                            elif shap_arr.ndim == 3:
-                                shap_mean_abs = shap_arr.mean(axis=0).mean(axis=1)  # mean over samples, then classes
-                            else:
-                                raise ValueError(f"Unexpected SHAP array dimensions: {shap_arr.shape}")
-
-                    except Exception as e:
-                        print(f"SHAP failed for {model_name} (task={task}, win={window_size}):", e)
-                        shap_mean_abs = None
-               
-                if shap_mean_abs is not None:
-                    df_shap = pd.DataFrame({
+                    df_imp = pd.DataFrame({
                         'feature': features,
-                        'shap_mean_abs': shap_mean_abs,
+                        'importance': importances,
                         'task': task,
                         'model': model_name,
                         'window_size': window_size
                     })
-                    all_shap_importances.append(df_shap)
+                    all_feature_importances.append(df_imp)
+
+                    # ------------------ SHAP for tree models + Logistic (if available) ------------------
+                    shap_mean_abs = None
+                    shap_possible_models = ['RF', 'XGBoost', 'LightGBM', 'LASSO_LR']
+                    if SHAP_AVAILABLE and model_name in shap_possible_models:
+                        try:
+                            # sample background to limit compute
+                            sample_size = min(CONFIG['shap_sample_size'], X_all.shape[0])
+                            if sample_size <= 0:
+                                continue
+                            # pick background/sample rows
+                            if sample_size < X_all.shape[0]:
+                                idx = np.random.choice(np.arange(X_all.shape[0]), size=sample_size, replace=False)
+                                X_shap = X_all[idx]
+                            else:
+                                X_shap = X_all
+
+                            if model_name in ['XGBoost', 'LightGBM', 'RF']:
+                                explainer = shap.TreeExplainer(full_model)
+                                shap_values = explainer.shap_values(X_shap)
+                            elif model_name == 'LASSO_LR':
+                                explainer = shap.LinearExplainer(full_model, X_shap, feature_perturbation='interventional')
+                                shap_values = explainer.shap_values(X_shap)
+                            else:
+                                shap_values = None
+
+                            if shap_values is not None:
+                                # unify to array for mean absolute computation
+                                if isinstance(shap_values, list):
+                                    # multiclass tree / linear models: list of arrays (n_samples, n_features)
+                                    shap_arr = np.stack(shap_values, axis=-1)  # shape: (n_samples, n_features, n_classes)
+                                else:
+                                    shap_arr = shap_values  # shape: (n_samples, n_features)
+
+                                shap_arr = np.abs(shap_arr)
+
+                                if shap_arr.ndim == 2:
+                                    shap_mean_abs = shap_arr.mean(axis=0)
+                                elif shap_arr.ndim == 3:
+                                    shap_mean_abs = shap_arr.mean(axis=0).mean(axis=1)  # mean over samples, then classes
+                                else:
+                                    raise ValueError(f"Unexpected SHAP array dimensions: {shap_arr.shape}")
+
+                        except Exception as e:
+                            print(f"SHAP failed for {model_name} (task={task}, win={window_size}):", e)
+                            shap_mean_abs = None
+                
+                    if shap_mean_abs is not None:
+                        df_shap = pd.DataFrame({
+                            'feature': features,
+                            'shap_mean_abs': shap_mean_abs,
+                            'task': task,
+                            'model': model_name,
+                            'window_size': window_size
+                        })
+                        all_shap_importances.append(df_shap)
+    # -----------------------------------------------------------------------
+        
 
 
     # ------------------ Save results & plots ------------------

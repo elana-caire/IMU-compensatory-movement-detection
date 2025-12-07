@@ -8,7 +8,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.model_selection import ParameterGrid
+from sklearn.model_selection import ParameterGrid, train_test_split
 from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_score, roc_auc_score
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
@@ -25,6 +25,9 @@ from sklearn.inspection import permutation_importance
 try:
     import shap
     SHAP_AVAILABLE = True
+    from shap.explainers import _permutation
+
+
 except Exception as e:
     print("shap not available:", e)
     SHAP_AVAILABLE = False
