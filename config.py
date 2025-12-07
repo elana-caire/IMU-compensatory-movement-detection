@@ -53,13 +53,13 @@ CONFIG = {
     # We can modify these lists to select specific sensors and features
     "sensors_to_consider":  ["arm_l", "arm_r", "wrist_l", "wrist_r", "trunk"], 
     "time_features": ["MAX", "MIN", "AMP", "MEAN", "JERK", "RMS", "COR", "STD"],
-    "frequency_features": [],
-    #"frequency_features": ["DOMFREQ", "DOMPOW", "TOTPOW", "SPEC_CENT", "SPEC_SPREAD"],
+    #"frequency_features": [],
+    "frequency_features": ["DOMFREQ", "DOMPOW", "TOTPOW", "SPEC_CENT", "SPEC_SPREAD"],
     # We can decide to omit specific modalities from a given sensor (e.g: only IMU)
-    "exclude_quat": True,
+    "exclude_quat": False,
     "exclude_acc": False,
     "exclude_gyro": False,
-    "exclude_mag": True,
+    "exclude_mag": False,
 }
 
 

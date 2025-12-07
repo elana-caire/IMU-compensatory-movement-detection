@@ -241,3 +241,47 @@ def plot_shap_heatmap(df_shap, task, save_folder, top_n):
     plt.savefig(Path(save_folder) / f"shap_heatmap_{task}.png", dpi=300)
     plt.close()
 
+
+def umap_projection(df_task, feature_columns, task, label_encoder):
+    import umap.umap_ as umap
+
+    # Features matrix and labels
+    X = df_task[feature_columns].values
+    y = df_task["Label"].values  # numeric labels from encode_labels
+
+    # UMAP reducer
+    reducer = umap.UMAP(
+        n_components=2,
+        n_neighbors=15,
+        min_dist=0.1,
+        metric="euclidean",
+        random_state=42,
+    )
+    emb = reducer.fit_transform(X)  # shape: (n_samples, 2)
+
+    # Optional: get human-readable class names, if label_encoder is available
+    unique_labels = np.unique(y)
+    try:
+        label_names = label_encoder.inverse_transform(unique_labels)
+    except Exception:
+        # fallback: just use numeric labels
+        label_names = [str(l) for l in unique_labels]
+
+    # Plot UMAP projection
+    plt.figure(figsize=(6, 5))
+    for lab, name in zip(unique_labels, label_names):
+        idx = y == lab
+        plt.scatter(
+            emb[idx, 0],
+            emb[idx, 1],
+            s=10,
+            alpha=0.7,
+            label=name,
+        )
+
+    plt.title(f"UMAP projection – task: {task}")
+    plt.xlabel("UMAP-1")
+    plt.ylabel("UMAP-2")
+    plt.legend(markerscale=2, fontsize=8, loc="best")
+    plt.tight_layout()
+    plt.show()
