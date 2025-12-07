@@ -9,24 +9,29 @@ from pathlib import Path
 WINDOW_SIZE_MS = [None, 250, 500, 750, 1000]
 
 # Raw IMU data path
-RAW_DATA_PATH = "/Users/sorresoayarey/Desktop/relab/Data/IMU Data"
+RAW_DATA_PATH = r"C:\Users\giusy\OneDrive\Desktop\AI_Healtcare\IMU-compensatory-movement-detection\Data\IMU Data"
 
 # Where to save extracted feature CSV files
-FEATURE_SAVE_PATH = "/Users/sorresoayarey/Desktop/relab/Data/Features"
-
+FEATURE_SAVE_PATH = r"C:\Users\giusy\OneDrive\Desktop\AI_Healtcare\IMU-compensatory-movement-detection\Data\Features"
 
 # --------- Model Training Parameters ---------
 CONFIG = {
-    "features_folder": "/storage/elana/relab/Data/Features",
-    "plots_folder": "/storage/elana/relab/Data/Plots",
-    "importance_folder": "/storage/elana/relab/Data/Plots/FeatureImportance",
-    "shap_folder": "/storage/elana/relab/Data/Plots/SHAP",
+    "features_folder": r"C:\Users\giusy\OneDrive\Desktop\AI_Healtcare\IMU-compensatory-movement-detection\Data\Features",
+    "plots_folder": r"C:\Users\giusy\OneDrive\Desktop\AI_Healtcare\IMU-compensatory-movement-detection\Data\Plots",
+    "importance_folder": r"C:\Users\giusy\OneDrive\Desktop\AI_Healtcare\IMU-compensatory-movement-detection\Data\FeatureImportance",
+    "shap_folder": r"C:\Users\giusy\OneDrive\Desktop\AI_Healtcare\IMU-compensatory-movement-detection\Data\SHAP",
+    "models_folder": r"C:\Users\giusy\OneDrive\Desktop\AI_Healtcare\IMU-compensatory-movement-detection\Data\Models",
 
     "target": "condition",
 
     "models_to_use": [
-        "RF", "SVM", "KNN", "MLP",
-        "XGBoost", "LightGBM", "LASSO_LR"
+        #"RF", 
+        #"SVM", 
+        #"KNN", 
+        "MLP",
+        "XGBoost", 
+        #"LightGBM", 
+        "LASSO_LR"
     ],
 
     "param_grids": {
@@ -44,7 +49,19 @@ CONFIG = {
 
     # SHAP settings
     "shap_sample_size": 500,
+
+    # We can modify these lists to select specific sensors and features
+    "sensors_to_consider":  ["arm_l", "arm_r", "wrist_l", "wrist_r", "trunk"], 
+    "time_features": ["MAX", "MIN", "AMP", "MEAN", "JERK", "RMS", "COR", "STD"],
+    "frequency_features": [],
+    #"frequency_features": ["DOMFREQ", "DOMPOW", "TOTPOW", "SPEC_CENT", "SPEC_SPREAD"],
+    # We can decide to omit specific modalities from a given sensor (e.g: only IMU)
+    "exclude_quat": True,
+    "exclude_acc": False,
+    "exclude_gyro": False,
+    "exclude_mag": True,
 }
+
 
 
 # ------------------------------------------------
@@ -58,9 +75,10 @@ def ensure_directories():
         CONFIG["features_folder"],
         CONFIG["plots_folder"],
         CONFIG["importance_folder"],
-        CONFIG["shap_folder"]
+        CONFIG["shap_folder"],
     ]
     for folder in folders:
+        
         Path(folder).mkdir(parents=True, exist_ok=True)
 
 # Run automatically
