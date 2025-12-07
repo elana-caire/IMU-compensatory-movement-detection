@@ -5,39 +5,14 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
-
+from utils.ml import *
 from config import CONFIG
-
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.model_selection import ParameterGrid
-from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_score, roc_auc_score
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.svm import SVC
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.neural_network import MLPClassifier
-from sklearn.linear_model import LogisticRegression
-from xgboost import XGBClassifier
-from lightgbm import LGBMClassifier
-from sklearn.utils import shuffle as sk_shuffle
-from sklearn.inspection import permutation_importance
 
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# SHAP might be heavy; import here and handle if missing
-try:
-    import shap
-    SHAP_AVAILABLE = True
-except Exception as e:
-    print("shap not available:", e)
-    SHAP_AVAILABLE = False
-
-RANDOM_STATE = 42
-np.random.seed(RANDOM_STATE)
 
 # --------------------------- CONFIG ---------------------------
-
-
 # create folders
 Path(CONFIG["plots_folder"]).mkdir(parents=True, exist_ok=True)
 Path(CONFIG["importance_folder"]).mkdir(parents=True, exist_ok=True)
@@ -178,13 +153,39 @@ def main():
     all_feature_importances = []
     all_shap_importances = []
 
+    
+    # Check if results file exists to resume
+    results_file = Path(CONFIG['models_folder'])/"loso_results.csv"
+    if results_file.exists():
+        print("Loading existing results from", results_file)
+        results_df = pd.read_csv(results_file)
+    else:
+        results_df = pd.DataFrame()
+        
+
     for file_path, window_size in tqdm(feature_files, desc="Processing windows"):
         print("Processing window :", window_size)
         df = pd.read_csv(file_path)
         df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
         df, label_encoder = encode_labels(df, CONFIG["target"])
 
-        features = [c for c in df.columns if c not in ['subject', 'task', CONFIG["target"], 'Label']]
+
+        #features = [c for c in df.columns if c not in ['subject', 'task', CONFIG["target"], 'Label']]
+
+        ## Consider Experimental Parameters from config.py
+
+        features = return_feature_columns(df, 
+                                        sensors_to_consider=CONFIG["sensors_to_consider"], 
+                                        time_features=CONFIG["time_features"], 
+                                        frequency_features=CONFIG["frequency_features"], 
+                                        exclude_acc=CONFIG["exclude_acc"], 
+                                        exclude_gyro=CONFIG["exclude_gyro"], 
+                                        exclude_mag=CONFIG["exclude_mag"], 
+                                        exclude_quat=CONFIG["exclude_quat"])
+        print("Considering features:", len(features))
+        print("Features:", features)
+        
+        
         subjects = df['subject'].unique()
         tasks = df['task'].unique()
 
@@ -267,10 +268,18 @@ def main():
                     'best_params': str(best_params)
                 })
                 all_results.append(metrics)
-
-                # ------------------ Retrain final model on full task data ------------------
+                # concat to results_df
+                results_df = pd.concat([results_df, pd.DataFrame([metrics])], ignore_index=True)
+                # save after each model
+                print(f"Completed {model_name} on task {task} (win={window_size})")
+                print(f"Accuracy={metrics['accuracy_mean']:.3f} (+{metrics['accuracy_upper'] - metrics['accuracy_mean']:.3f}/-{metrics['accuracy_mean'] - metrics['accuracy_lower']:.3f}),")
+                
+                results_df.to_csv(results_file, index=False)
+               
+                # ------------------ Retrain Best Performing on full task data ------------------
                 full_model = create_model(model_name, best_params)
                 scaler = StandardScaler()
+
                 X_all = scaler.fit_transform(df_task[features].values)
                 y_all = df_task['Label'].values
 
@@ -367,8 +376,8 @@ def main():
 
 
     # ------------------ Save results & plots ------------------
-    results_df = pd.DataFrame(all_results)
-    results_df.to_csv(Path(CONFIG['plots_folder']) / 'model_results_summary.csv', index=False)
+    #results_df = pd.DataFrame(all_results)
+    #results_df.to_csv(Path(CONFIG['models_folder']), index=False)
 
     if all_feature_importances:
         df_imp_all = pd.concat(all_feature_importances, ignore_index=True)
