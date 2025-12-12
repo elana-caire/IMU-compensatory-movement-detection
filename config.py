@@ -25,13 +25,13 @@ CONFIG = {
     "target": "condition",
 
     "models_to_use": [
-        #"RF", 
-        #"SVM", 
-        #"KNN", 
-        #"MLP",
-        #"XGBoost", 
-        #"LightGBM", 
-        "LASSO_LR"
+        "RF", 
+        "SVM", 
+        "KNN", 
+        "MLP",
+        "XGBoost", 
+        "LightGBM", 
+        #"LASSO_LR"
     ],
 
     "param_grids": {
