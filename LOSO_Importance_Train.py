@@ -1,4 +1,4 @@
-# Interesting Article Here: https://www.linkedin.com/pulse/shap-all-you-need-why-should-always-use-permutation-alastair-olunc/
+
 import warnings
 warnings.filterwarnings('ignore')
 import joblib
@@ -85,7 +85,7 @@ def shap_to_3d(shap_values):
 SAVE_DIR = r"C:\Users\giusy\OneDrive\Desktop\AI_Healtcare\IMU-compensatory-movement-detection\Data\ModelsFinal"
 models_summary_path = SAVE_DIR+"/model_results_summary_refactored.csv"          
 # this is the file where results summary is saved
-task_specific = False               # set to True to Train Task specific models, else false
+task_specific = True               # set to True to Train Task specific models, else false
 
 # ---- choose the tag used in your results file for task-agnostic ----
 TASK_AGNOSTIC_TAG = "all_tasks"
@@ -147,6 +147,10 @@ if __name__=='__main__':
             df_best = df_best[df_best["model_name"].isin(best_models)]
 
             for task_name in df_best["task"].unique():
+                if task_name != "peg":
+                    print("Alreadz trained")
+                    continue
+
                 is_task_agnostic = (task_name == TASK_AGNOSTIC_TAG)
 
                 # -------------------- DATA SELECTION --------------------
@@ -156,6 +160,9 @@ if __name__=='__main__':
                 subjects = data_task["subject"].unique()
 
                 for curr_model in best_models:
+                    if curr_model!='MLP':
+                        print(f"{curr_model} already trained")
+                        continue
 
                     # -------------------- PARAMS SELECTION --------------------
                     params_task = TASK_AGNOSTIC_TAG if is_task_agnostic else task_name

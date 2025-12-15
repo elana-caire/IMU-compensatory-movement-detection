@@ -7,7 +7,7 @@ from pathlib import Path
 
 # --------- Data Preparation Parameters ---------
 #WINDOW_SIZE_MS = [None, 250, 500, 750, 1000]
-WINDOW_SIZE_MS = [1000]
+WINDOW_SIZE_MS = [750]
 # Raw IMU data path
 RAW_DATA_PATH = r"C:\Users\giusy\OneDrive\Desktop\AI_Healtcare\IMU-compensatory-movement-detection\Data\IMU Data"
 
@@ -20,17 +20,17 @@ CONFIG = {
     "plots_folder": r"C:\Users\giusy\OneDrive\Desktop\AI_Healtcare\IMU-compensatory-movement-detection\Data\Plots",
     "importance_folder": r"C:\Users\giusy\OneDrive\Desktop\AI_Healtcare\IMU-compensatory-movement-detection\Data\FeatureImportance",
     "shap_folder": r"C:\Users\giusy\OneDrive\Desktop\AI_Healtcare\IMU-compensatory-movement-detection\Data\SHAP",
-    "models_folder": r"C:\Users\giusy\OneDrive\Desktop\AI_Healtcare\IMU-compensatory-movement-detection\Data\Models",
+    "models_folder": r"C:\Users\giusy\OneDrive\Desktop\AI_Healtcare\IMU-compensatory-movement-detection\Data\ModelsFinalGlobal",
 
     "target": "condition",
 
     "models_to_use": [
-        "RF", 
-        "SVM", 
-        "KNN", 
+        #"RF", 
+        #"SVM", 
+        #"KNN", 
         "MLP",
-        "XGBoost", 
-        "LightGBM", 
+        #"XGBoost", 
+        #"LightGBM", 
         #"LASSO_LR"
     ],
 

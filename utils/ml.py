@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import os
 import argparse
+
+import hashlib  
 import json
 from collections import defaultdict
 import numpy as np
@@ -9,7 +11,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.model_selection import ParameterGrid, train_test_split
-from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_score, roc_auc_score
+from sklearn.metrics import make_scorer, f1_score, accuracy_score, precision_score, recall_score, roc_auc_score
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
@@ -19,6 +21,7 @@ from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from sklearn.utils import shuffle as sk_shuffle
 from sklearn.inspection import permutation_importance
+import shap
 
 
 # SHAP might be heavy; import here and handle if missing
@@ -51,6 +54,55 @@ def encode_condition_labels(df):
     
     return df
 
+
+def create_temporal_train_test_folds(df):
+
+    unique_subjects   = df["subject"].unique()
+    unique_tasks      = df["task"].unique()
+    unique_conditions = df["condition"].unique()
+
+    K = 5  # 5 folds = 20% each
+
+    fold_splits = []  # list of (fold_idx, df_train, df_test)
+
+    for fold_idx in range(K):
+        df_train_parts = []
+        df_test_parts  = []
+
+        for subject in unique_subjects:
+            df_subj = df[df["subject"] == subject]
+
+            for task in unique_tasks:
+                for condition in unique_conditions:
+                    df_subset = df_subj[(df_subj["task"] == task) & (df_subj["condition"] == condition)]
+                    if df_subset.empty:
+                        continue
+
+                    # IMPORTANT: keep temporal order
+                    # If you have a time column, sort by it here:
+                    # df_subset = df_subset.sort_values("time_col").reset_index(drop=True)
+                    df_subset = df_subset.reset_index(drop=True)
+
+                    n = len(df_subset)
+                    fold_size = int(np.floor(n / K))
+                    start = fold_idx * fold_size
+
+                    # last fold takes the remainder
+                    end = (start + fold_size) if fold_idx < K - 1 else n
+
+                    test_idx = np.arange(start, end)
+                    train_idx = np.concatenate([np.arange(0, start), np.arange(end, n)])
+
+                    df_test_parts.append(df_subset.iloc[test_idx])
+                    df_train_parts.append(df_subset.iloc[train_idx])
+
+        df_train_fold = pd.concat(df_train_parts, axis=0, ignore_index=True)
+        df_test_fold  = pd.concat(df_test_parts,  axis=0, ignore_index=True)
+
+        fold_splits.append((fold_idx, df_train_fold, df_test_fold))
+
+        print(f"Fold {fold_idx}: train={len(df_train_fold)}, test={len(df_test_fold)}")
+    return fold_splits
 
 def return_feature_columns(df, sensors_to_consider, 
                            time_features:list, 
@@ -141,10 +193,10 @@ def create_model(name, params=None):
         "RF": RandomForestClassifier(random_state=RANDOM_STATE),
         "SVM": SVC(random_state=RANDOM_STATE, probability=True),
         "KNN": KNeighborsClassifier(),
-        "MLP": MLPClassifier(random_state=RANDOM_STATE, max_iter=500),
+        "MLP": MLPClassifier(random_state=RANDOM_STATE, max_iter=100),
         "XGBoost": XGBClassifier(random_state=RANDOM_STATE, eval_metric='mlogloss', use_label_encoder=False),
         "LightGBM": LGBMClassifier(random_state=RANDOM_STATE),
-        "LASSO_LR": LogisticRegression(penalty='l1', solver='saga', multi_class='multinomial', max_iter=5000, random_state=RANDOM_STATE)
+        "LASSO_LR": LogisticRegression(penalty='l1', solver='saga', multi_class='multinomial', max_iter=1000, random_state=RANDOM_STATE)
     }
     model = base_models[name]
     if params:
@@ -288,3 +340,102 @@ def umap_projection(df_task, feature_columns, task, label_encoder):
     plt.legend(markerscale=2, fontsize=8, loc="best")
     plt.tight_layout()
     plt.show()
+
+
+
+def balanced_subsample_after_scaling(X_train_scaled, y_train, n_total=100, random_state=0):
+    rng = np.random.default_rng(random_state)
+
+    y = np.asarray(y_train)
+    idx_all = np.arange(len(y))
+    classes = np.unique(y)
+    k = len(classes)
+
+    base = n_total // k
+    rem  = n_total % k
+
+    chosen = []
+    for i, c in enumerate(classes):
+        idx_c = idx_all[y == c]
+        n_c = base + (1 if i < rem else 0)
+
+        # sample with replacement if not enough examples in class
+        replace = len(idx_c) < n_c
+        chosen_c = rng.choice(idx_c, size=n_c, replace=replace)
+        chosen.append(chosen_c)
+
+    chosen_idx = np.concatenate(chosen)
+    rng.shuffle(chosen_idx)
+
+    X_sub = X_train_scaled[chosen_idx]
+    y_sub = y[chosen_idx]
+    return X_sub, y_sub
+
+
+
+def shap_to_3d(shap_values):
+    """
+    Return SHAP values as (n_samples, n_features, n_classes).
+    Handles:
+      - array (n, f, c)
+      - array (n, f) -> assumes single output -> (n, f, 1)
+      - list of arrays (per class) each (n, f) -> (n, f, c)
+    """
+    if isinstance(shap_values, list):
+        sv = np.stack(shap_values, axis=-1)  # (n, f, c)
+        return sv
+    sv = np.asarray(shap_values)
+    if sv.ndim == 2:
+        return sv[:, :, None]
+    if sv.ndim == 3:
+        return sv
+    raise ValueError(f"Unexpected SHAP shape/type: {type(shap_values)}, shape={getattr(sv,'shape',None)}")
+
+def agg_stats(series: pd.Series):
+    """Return mean/std + median/IQR (more robust to outliers)."""
+    s = series.dropna().astype(float)
+    if len(s) == 0:
+        return pd.Series({"mean": np.nan, "std": np.nan, "median": np.nan, "q25": np.nan, "q75": np.nan})
+    return pd.Series({
+        "mean": float(s.mean()),
+        "std": float(s.std(ddof=1)) if len(s) > 1 else 0.0,
+        "median": float(s.median()),
+        "q25": float(s.quantile(0.25)),
+        "q75": float(s.quantile(0.75)),
+    })
+
+def params_to_id(params: dict) -> str:  # <-- NEW
+    """Stable, filesystem-safe id for a param dict."""
+    s = json.dumps(params, sort_keys=True)
+    h = hashlib.md5(s.encode("utf-8")).hexdigest()[:10]
+    return f"p_{h}"
+
+
+def upsert_rows(df_old: pd.DataFrame, df_new: pd.DataFrame, key_cols: list) -> pd.DataFrame:  # <-- NEW
+    """Append and drop duplicates by key (keep last)."""
+    if df_old is None or df_old.empty:
+        return df_new.copy()
+    out = pd.concat([df_old, df_new], ignore_index=True)
+    out = out.drop_duplicates(subset=key_cols, keep="last")
+    return out
+
+
+def parse_params_cell(v):
+    """Robust parse for dict-ish strings in CSV."""
+    if isinstance(v, dict):
+        return v
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return {}
+    s = str(v).strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+        s = s[1:-1].strip()
+    s = s.encode("utf-8").decode("unicode_escape").strip()
+    if not s.lstrip().startswith("{"):
+        s = "{" + s.strip().strip(",") + "}"
+    try:
+        d = json.loads(s)
+    except json.JSONDecodeError:
+        d = ast.literal_eval(s)
+    if not isinstance(d, dict):
+        raise ValueError(f"Parsed value is not a dict: {type(d)}")
+    return d
