@@ -82,7 +82,6 @@ Conditions: 'normal', 'elbow_brace', 'elbow_wrist_brace'
 
 Index = window start (sample index aligned to movement onset).
 
-
 ### Example of usage
 
 ```python
@@ -94,37 +93,52 @@ subj_feat = feats_all[feats_all['subject'] == 'P02']
 subj_task = subj_feat[subj_feat['task'] == 'cup-placing']
 ```
 
+## Train models with LOSO configuration
+
 ## 🧰 Run Task-Specific Models
 ```bash
-python train_task_specific_loso.py
+python3 train_model_task_specific.py
 ```
 
-This script:
-1. Loads features for a given window size
-2. Trains task-specific models, with Leave-One-Subject-Out Approach.
-    - For a given model, an outer grid-search is performed to fix the hyperparameters
-    - For a given set of hyperparameters, LOSO CV is conducted
-3. Saves the results to CSV file
----
+## 🧰 Run Task-Agnostic Models
+```bash
+python3 train_models_task_agnostic.py
+```
 
-### What to change
-Experimental Parameters are defined on top of the script
+## Train models with temporal splitting configuration
 
-```python
-WINDOW_SIZE_MS = [None] #[None, 250, 500, 750, 1000]            # None if we want to consider entire window
-# We can modify these flags if we want to omit specific modalities from a given sensor (e.g: only IMU)
-exclude_quat = False
-exclude_acc = False
-exclude_gyro = False
-exclude_mag = False
+Set the parameter "task_specific" to true or false to pick between task specific and task agnostic models in the config.py file
 
-# We can modify this list if we want to omit some sensors
-sensors_to_consider = ["arm_l", "arm_r", "wrist_l", "wrist_r", "trunk"]
-# We can modify this list if we want to omit specific features
-time_features = ["MAX", "MIN", "AMP", "MEAN", "JERK", "RMS", "COR", "STD"]
-frequency_features = ["DOMFREQ", "DOMPOW", "TOTPOW", "SPEC_CENT", "SPEC_SPREAD"]
-# Change This flag if we want to apply PCA (otherwise, we can also manually select the features)
-apply_pca = False
+```bash
+python3 GLOBAL_trainings.py
+```
+
+## Post-hoc Explainability & Re-Training Script on top performing models
+
+## LOSO configuration 
+
+This script re-trains top-performing models using Leave-One-Subject-Out (LOSO) cross-validation and computes post-hoc explainability metrics using:
+SHAP values (feature attribution per class)
+Permutation Importance (model-agnostic feature importance)
+It is intended to be run after model selection and hyperparameter tuning have been completed, using the results stored in model_results_summary_refactored.csv.
+
+```bash
+python3 LOSO_Importance_Train.py
+```
+
+```bash
+python3 LOSO_Importance_Eval.py
+```
+
+```bash
+python3 LOSO_SHAP_BEST.py
+```
+
+## Time split configuration
+
+
+```bash
+python3 GLOBAL_Importance.py
 ```
 
 ### To-Do Experiments
