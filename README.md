@@ -100,10 +100,6 @@ subj_task = subj_feat[subj_feat['task'] == 'cup-placing']
 python3 train_model_task_specific.py
 ```
 
-## 🧰 Run Task-Agnostic Models
-```bash
-python3 train_models_task_agnostic.py
-```
 
 ## Train models with temporal splitting configuration
 
@@ -130,9 +126,6 @@ python3 LOSO_Importance_Train.py
 python3 LOSO_Importance_Eval.py
 ```
 
-```bash
-python3 LOSO_SHAP_BEST.py
-```
 
 ## Time split configuration
 
