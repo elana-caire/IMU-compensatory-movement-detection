@@ -25,40 +25,57 @@ from utils.ml import (
     parse_params_cell,
     shap_to_3d,
 )
-from config import CONFIG
 
+import config.training_common as training_config
+import config.time_split as time_split_config
+import config.paths as paths_config
 
-# --------------------------- CONFIG ---------------------------
-# SHAP runtime control
-BG_N = 100
-EXPL_N = 50
-KERNEL_NSAMPLES = 200
+MODELS_PATH = paths_config.MODELS_PATH
+FEATURES_PATH = paths_config.FEATURES_PATH
+BEST_MODELS_PATH = paths_config.BEST_MODELS_PATH
+SHAP_PATH = paths_config.SHAP_PATH
+IMPORTANCE_PATH = paths_config.IMPORTANCE_PATH
+
+BG_N = time_split_config.BG_N
+EXPL_N = time_split_config.EXPL_N
+KERNEL_NSAMPLES = time_split_config.KERNEL_NSAMPLES
 
 # Permutation importance control
-PERM_N_REPEATS = 10
+PERM_N_REPEATS = time_split_config.PERM_N_REPEATS
 PERM_SCORER = make_scorer(f1_score, average="macro")
 
 # Calibration (reliability diagram on confidence)
-CAL_N_BINS = 10
+CAL_N_BINS = time_split_config.CAL_N_BINS
 
-MODELS_TO_EXPLAIN = ["MLP", "LASSO_LR"]  # set what you want
-WINDOW_TO_PROCESS = 750
+MODELS_TO_EXPLAIN = time_split_config.BEST_MODELS_FOR_EXPLAINABILITY
+WINDOW_TO_PROCESS = time_split_config.WINDOW_TO_PROCESS
+TARGET = training_config.TARGET
 
-models_root = Path(CONFIG["models_folder"])
-results_agg_path = models_root / "Global_CV_Results_agg.csv"
+results_folds_path = MODELS_PATH / "model_results_Global_folds.csv"
+results_agg_path   = MODELS_PATH / "model_results_Global_agg.csv"
 
-out_root = models_root / "Global_CV_Explainability_bestcfg"
-out_shap = out_root / "shap"
-out_perm = out_root / "perm"
-out_metrics = out_root / "metrics"
-out_cal = out_root / "calibration"
+out_shap = SHAP_PATH
+out_perm = IMPORTANCE_PATH
+out_metrics = BEST_MODELS_PATH
+out_cal = BEST_MODELS_PATH
 
 out_shap.mkdir(parents=True, exist_ok=True)
 out_perm.mkdir(parents=True, exist_ok=True)
 out_metrics.mkdir(parents=True, exist_ok=True)
 out_cal.mkdir(parents=True, exist_ok=True)
 
-RANDOM_STATE = CONFIG.get("random_state", 42)
+RANDOM_STATE = training_config.RANDOM_STATE
+TARGET = training_config.TARGET
+SENSORS = training_config.SENSORS
+TIME_FEATURES = training_config.TIME_FEATURES
+FREQ_FEATURES = training_config.FREQ_FEATURES
+EXCLUDE_QUAT = training_config.EXCLUDE_QUAT
+EXCLUDE_ACC = training_config.EXCLUDE_ACC
+EXCLUDE_GYRO = training_config.EXCLUDE_GYRO
+EXCLUDE_MAG = training_config.EXCLUDE_MAG
+PARAM_GRIDS = training_config.PARAM_GRIDS
+
+TASK_SPECIFIC = time_split_config.TASK_SPECIFIC
 
 
 # --------------------------- HELPERS ---------------------------
@@ -146,23 +163,23 @@ def main():
         raise FileNotFoundError(f"Missing: {results_agg_path}")
 
     # ---------- load data ----------
-    df = pd.read_csv(Path(CONFIG["features_folder"]) / f"features_win_{WINDOW_TO_PROCESS}.csv")
+    df = pd.read_csv(Path(FEATURES_PATH) / f"features_win_{WINDOW_TO_PROCESS}.csv")
     df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
-    df, label_encoder = encode_labels(df, CONFIG["target"])
+    df, label_encoder = encode_labels(df, TARGET)
 
     features = return_feature_columns(
         df,
-        sensors_to_consider=CONFIG["sensors_to_consider"],
-        time_features=CONFIG["time_features"],
-        frequency_features=CONFIG["frequency_features"],
-        exclude_acc=CONFIG["exclude_acc"],
-        exclude_gyro=CONFIG["exclude_gyro"],
-        exclude_mag=CONFIG["exclude_mag"],
-        exclude_quat=CONFIG["exclude_quat"],
+        sensors_to_consider=SENSORS,
+        time_features=TIME_FEATURES,
+        frequency_features=FREQ_FEATURES,
+        exclude_acc=EXCLUDE_ACC,
+        exclude_gyro=EXCLUDE_GYRO,
+        exclude_mag=EXCLUDE_MAG,
+        exclude_quat=EXCLUDE_QUAT,
     )
 
     # ---------- decide tasks ----------
-    if CONFIG["task_specific"]:
+    if TASK_SPECIFIC:
         tasks_to_run = list(df["task"].unique())
     else:
         tasks_to_run = ["all_tasks"]  # global model
@@ -209,7 +226,7 @@ def main():
 
     # ---------- loop tasks/models, reload fold models ----------
     for task_name in tasks_to_run:
-        df_task = df.copy() if (not CONFIG["task_specific"]) else df[df["task"] == task_name].copy()
+        df_task = df.copy() if (not TASK_SPECIFIC) else df[df["task"] == task_name].copy()
         folds = create_temporal_train_test_folds(df_task)
 
         for model_name in MODELS_TO_EXPLAIN:
@@ -222,7 +239,7 @@ def main():
             best_params = best_lookup[key]["best_params"]
             print(f"[INFO] Using best params task={task_name}, model={model_name}: {best_params}")
 
-            model_folder = models_root / task_name / model_name / params_id
+            model_folder = BEST_MODELS_PATH / task_name / model_name / params_id
 
             # output paths (evalTask format)
             metrics_per_fold_path = out_metrics / f"metrics_{task_name}_{model_name}_best_per_fold_per_task.csv"
@@ -290,7 +307,7 @@ def main():
                 })
 
                 # per-task metrics inside all_tasks model
-                if (not CONFIG["task_specific"]) and task_name == "all_tasks":
+                if (not TASK_SPECIFIC) and task_name == "all_tasks":
                     for t in eval_tasks:
                         mask = (df_test["task"].values == t)
                         if mask.sum() == 0:
@@ -314,7 +331,7 @@ def main():
                 # ------------------- CALIBRATION (GLOBAL ONLY) -------------------
                 # only for global model eval (all_tasks), requires predict_proba
                 if (
-                    (not CONFIG["task_specific"])
+                    (not TASK_SPECIFIC)
                     and task_name == "all_tasks"
                     and y_proba_all is not None
                 ):
@@ -417,7 +434,7 @@ def main():
                 run_explainability("all_tasks", df_train, df_test)
 
                 # (B) per-task explainability using SAME all_tasks model
-                if (not CONFIG["task_specific"]) and task_name == "all_tasks":
+                if (not TASK_SPECIFIC) and task_name == "all_tasks":
                     for t in eval_tasks:
                         df_train_t = df_train[df_train["task"] == t]
                         df_test_t  = df_test[df_test["task"] == t]

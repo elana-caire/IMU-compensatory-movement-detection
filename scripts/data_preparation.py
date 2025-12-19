@@ -4,22 +4,28 @@ from tqdm import tqdm
 
 import pandas as pd
 
-from config import WINDOW_SIZE_MS, RAW_DATA_PATH, FEATURE_SAVE_PATH
-
 import utils.filtering as flt
 from utils.feature_extraction import *
 from utils.load_data import *
 from utils.filtering import *
 from utils.movement_onset import *
 
+from config.data_prep import WINDOW_SIZE_MS
+from config.paths import RAW_DATA_PATH, FEATURES_PATH
+import config.data_prep as data_prep_config
+
+WINDOW_SIZE_MS = data_prep_config.WINDOW_SIZE_MS
+TASK_NAMES = data_prep_config.TASK_NAMES
+CONDITION_NAMES = data_prep_config.CONDITION_NAMES
+
 if __name__ == '__main__':
 
     for window_size in WINDOW_SIZE_MS:
 
         if window_size is not None:
-            saving_path = f"{FEATURE_SAVE_PATH}/features_win_{window_size}.csv"
+            saving_path = f"{FEATURES_PATH}/features_win_{window_size}.csv"
         else:
-            saving_path = f"{FEATURE_SAVE_PATH}/features.csv"
+            saving_path = f"{FEATURES_PATH}/features.csv"
 
         if Path(saving_path).exists():
             print(f"Feature file {saving_path} already exists, skipping.")
